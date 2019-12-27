@@ -175,7 +175,7 @@ class Flatten(torch.nn.Module):
     """
     Flatten
 
-    torch.view as a layer.
+    torch.flatten as a layer.
     """
     def __init__(self,start_dim=1):
         """
