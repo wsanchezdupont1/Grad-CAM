@@ -1,6 +1,7 @@
 """
 
 Willis Sanchez-duPont
+wsanchezdupont@g.hmc.edu
 
 Implementation of Grad-CAM (https://arxiv.org/abs/1610.02391).
 
