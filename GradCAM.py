@@ -67,7 +67,7 @@ class GradCAM():
             classes - (list) list of indices specifying which classes to compute grad-CAM for (MUST CONTAIN UNIQUE ELEMENTS). CAMs are returned in same order as specified in classes.
 
         outputs:
-            self.gradCAMs - (torch.ndarray) numpy.ndarray of shape (batch,classes,u,v) where u and v are the activation map dimensions
+            self.gradCAMs - (numpy.ndarray) numpy.ndarray of shape (batch,classes,u,v) where u and v are the activation map dimensions
         """
         self.inputs = x.to(self.device)
 
