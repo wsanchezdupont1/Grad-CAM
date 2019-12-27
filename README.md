@@ -13,4 +13,4 @@ pytorch 1.4
 
 numpy 1.16.5
 
-opencv-python 4.1.2.20
+opencv-python 4.1.2.30
