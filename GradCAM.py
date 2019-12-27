@@ -184,7 +184,7 @@ class Flatten(torch.nn.Module):
         Constructor.
 
         inputs:
-        start_idm - (bool) dimension to begin flattening at.
+        start_dim - (bool) dimension to begin flattening at.
         """
         super(Flatten,self).__init__()
         self.start_dim = start_dim
