@@ -19,13 +19,18 @@ for p in n.parameters():
 h = n.register_backward_hook(hookfoo)
 
 y = n(x)
-print('y =',y)
-print('\n\n\n\n')
 y.sum().backward()
-
+print('\ny =',y)
 print('x.grad =',x.grad)
-
 print('\n\n\n\n')
+
+
+# a = torch.ones(8,4,requires_grad=True)
+# n(a).sum().backward()
+# print('a.grad =',a.grad)
+# print('\n\n\n\n')
+
+
 
 class Foo(torch.nn.Module):
     def __init__(self):
