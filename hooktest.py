@@ -1,5 +1,7 @@
 import torch
 
+
+# linear
 def hookfoo(mod,gradin,gradout):
     print('module =',mod)
     for i in range(len(gradin)):
@@ -15,7 +17,7 @@ def hookfoo(mod,gradin,gradout):
     #     print('gradout[{}].shape ='.format(i),gradout[i].shape)
     #     print('gradout[{}] ='.format(i),gradout[i])
 
-    # return (gradin[0], torch.nn.ReLU()(gradin[1]), gradin[2])
+    return (gradin[0], torch.nn.ReLU()(gradin[1]), gradin[2])
 
 x = 2*torch.ones(8,4)
 x.requires_grad = True
@@ -32,15 +34,8 @@ print('\ny =',y)
 print('x.grad =',x.grad)
 print('\n\n\n\n')
 
-h.remove()
 
-# a = torch.ones(8,4,requires_grad=True)
-# n(a).sum().backward()
-# print('a.grad =',a.grad)
-# print('\n\n\n\n')
-
-
-
+# multi-input multi-output
 class Foo(torch.nn.Module):
     def __init__(self):
         super(Foo,self).__init__()
@@ -63,3 +58,18 @@ y,z = f(x1,x2)
 (y.sum() + z.sum()).backward()
 print('x1.grad =',x1.grad)
 print('x2.grad =',x2.grad)
+
+print('\n\n\n\n')
+
+
+# conv layers
+def hookfoo(a,b,c):
+    print('b[0].shape =',b[0].shape)
+    print('b[0] =',b[0])
+
+x = torch.rand(2,3,4,4,requires_grad=True)
+print("x =",x)
+n = torch.nn.Conv2d(3,5,3)
+h = n.register_backward_hook(hookfoo)
+n(x).sum().backward()
+print('x.grad =',x.grad)

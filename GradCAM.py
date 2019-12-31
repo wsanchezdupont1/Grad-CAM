@@ -29,22 +29,29 @@ import numpy as np
 import torch
 import torch.nn as nn
 
+import matplotlib.pyplot as plt
+TEMP_GRAD = None
+
 class GradCAM():
     """
     GradCAM
 
     Class that performs grad-CAM algorithm on a given model (ARXIV LINK HERE).
     """
-    def __init__(self,model,device='cuda'):
+    def __init__(self,model,device='cuda',guided=None,verbose=False):
         """
         Constructor.
 
         inputs:
             model - (torch.nn.Module) Indexable module to perform grad-cam on (e.g. torch.nn.Sequential)
             device - (str) device to perform computations on
+            guided - (None or True or list) Guided grad-CAM enabler. If None, no guided gradcam. If True,
+                     apply guided backprop to all modules in self._modules.items() that have the same
+                     __class__ type as torch.nn.Conv2d(1,1,1). If list, apply hooks to all modules in
+                     the given list
+            verbose - (bool) enables printouts for e.g. debugging
         """
         self.device = device
-        self.inputs = torch.empty(0)
         self.model = model
         model.to(self.device) # push params to device
 
@@ -54,6 +61,31 @@ class GradCAM():
         self.gradCAMs = torch.empty(0) # output maps
         self.fh = [] # module forward hook
         self.bh = [] # module backward hook
+
+        self.guided = guided
+        self.guidehooks = [] # list of hooks on conv layers for guided backprop
+        self.gradReLU = None
+
+        self.verbose = verbose
+
+        # TODO: look up if this applies to non-conv layers
+        if guided is not None:
+            self.gradReLU = torch.nn.ReLU() # relu layer to zero out negative gradients
+
+            if guided is True:
+                for name,module in self.model._modules.items():
+                    if module.__class__ == torch.nn.Conv2d(1,1,1).__class__: # TODO: make this more elegant instead of creating a dummy Conv2d
+                        h = module.register_backward_hook(self.guidedhook)
+                        self.guidehooks.append(h)
+
+            elif type(guided) == type([]):
+                for module in guided:
+                    h = module.register_backward_hook(self.guidedhook)
+                    self.guidehooks.append(h)
+
+            if self.verbose:
+                print('len(self.guidehooks) =',len(self.guidehooks))
+                print('guided backprop hooks set')
 
     def __call__(self,x,submodule=None,classes='all'):
         """
@@ -69,17 +101,26 @@ class GradCAM():
         outputs:
             self.gradCAMs - (numpy.ndarray) numpy.ndarray of shape (batch,classes,u,v) where u and v are the activation map dimensions
         """
-        self.inputs = x.to(self.device)
+        x = x.to(self.device)
+        if self.verbose:
+            print('samples pushed to device')
 
         if submodule is None:
-            self.activations = self.inputs # treat inputs as activation maps
+            self.activations = x # treat inputs as activation maps
 
         # hook registration
         self.sethooks(submodule)
+        if self.verbose:
+            print('CAM hooks set')
 
         # forward pass
-        self.results = self.model(self.inputs) # store result (already on device)
+        if self.guided:
+            x.requires_grad = True
+
+        self.results = self.model(x) # store result (already on device)
         self.gradCAMs = torch.empty(0)
+        if self.verbose:
+            print('model outputs computed')
 
         # grad and CAM computations
         summed = self.results.sum(dim=0) # sum out batch results. See note at top of file
@@ -100,13 +141,30 @@ class GradCAM():
             self.gradCAMs = torch.cat([self.gradCAMs, cam.unsqueeze(0).to('cpu')],dim=0) # add CAMs to function output variable
             self.model.zero_grad() # clear gradients for next backprop
 
+            if c == 243:
+                TEMP_GRAD = x.grad[0].permute(1,2,0).detach().numpy()
+
+            x.grad.data = torch.zeros_like(x.grad.data) # clear out input grads as well
+
+            if self.verbose:
+                print('class {} gradCAMs computed'.format(c))
 
         # remove hooks
         self.bh.remove()
         if submodule is not None:
             self.fh.remove()
 
+        if len(self.guidehooks) == 0:
+            for hook in self.guidehooks:
+                hook.remove()
+
+        if self.verbose:
+            print('all hooks removed')
+
         self.gradCAMs = self.gradCAMs.permute(1,0,2,3).detach().numpy() # batch first, requires_grad=False, and convert to numpy array
+
+        if self.verbose:
+            print('x.grad.shape =',x.grad.shape)
 
         return self.gradCAMs
 
@@ -170,6 +228,24 @@ class GradCAM():
             self.fh = submodule.register_forward_hook(getactivation) # forward hook
             self.bh = submodule.register_backward_hook(getgrad) # backward hook
 
+    def guidedhook(self,mod,gradin,gradout):
+        """
+        guidedhook
+
+        Hook that applies a ReLU operation to gradients for guided backpropagation.
+        Modifies gradient during backprop by returning an altered gradin.
+
+        inputs:
+            mod - (torch.nn.Module) module being hooked
+            gradin - (tuple) tuple of gradients of loss w.r.t inputs and parameters of mod.
+                     Different for various layer types. For Conv2d layers, it's
+                     (input.grad, mod.weight.grad, mod.bias.grad)
+            gradout - (tuple) tuple of gradients of loss w.r.t. outputs of mod
+        """
+        if len(gradin) == 1:
+            return (self.gradReLU(gradin[0]))
+
+        return (self.gradReLU(gradin[0]), gradin[1], gradin[2])
 
 class Flatten(torch.nn.Module):
     """
@@ -276,7 +352,12 @@ if __name__ == '__main__':
     vgg.eval()
 
     # create GradCAM object and generae grad-CAMs
-    GC = GradCAM(model = vgg, device = 'cuda')
+    hookmods = []
+    for name,module in vgg.features._modules.items():
+        if module.__class__ == torch.nn.Conv2d(1,1,1).__class__:
+            hookmods.append(module)
+
+    GC = GradCAM(model = vgg, device = 'cuda', guided = hookmods, verbose=True)
     classes = [243,281]
     cam = GC(im,submodule=GC.model.features._modules["35"],classes=classes)
 
@@ -285,3 +366,6 @@ if __name__ == '__main__':
         mask = cv2.resize(cam[0][i],(224,224))
         mask = (mask - np.min(mask)) / np.max(mask)
         create_masked_image(x,mask ,filename='examples/cam_class_{}.jpg'.format(classes[i]))
+
+    print('type(TEMP_GRAD) =',type(TEMP_GRAD))
+    plt.imshow(TEMP_GRAD)
