@@ -29,9 +29,6 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-import matplotlib.pyplot as plt
-TEMP_GRAD = None
-
 class GradCAM():
     """
     GradCAM
@@ -46,8 +43,8 @@ class GradCAM():
             model - (torch.nn.Module) Indexable module to perform grad-cam on (e.g. torch.nn.Sequential)
             device - (str) device to perform computations on
             guided - (None or True or list) Guided grad-CAM enabler. If None, no guided gradcam. If True,
-                     apply guided backprop to all modules in self._modules.items() that have the same
-                     __class__ type as torch.nn.Conv2d(1,1,1). If list, apply hooks to all modules in
+            apply guided backprop to all modules in self._modules.items() that have a
+                     __class__.__name__ of ReLU. If list, apply hooks to all modules in
                      the given list
             verbose - (bool) enables printouts for e.g. debugging
         """
@@ -64,28 +61,24 @@ class GradCAM():
 
         self.guided = guided
         self.guidehooks = [] # list of hooks on conv layers for guided backprop
-        self.gradReLU = None
+        self.inputGrads = torch.empty(0) # grads of class activations w.r.t. inputs
 
         self.verbose = verbose
 
         # TODO: look up if this applies to non-conv layers
-        if guided is not None:
-            self.gradReLU = torch.nn.ReLU() # relu layer to zero out negative gradients
-
-            if guided is True:
-                for name,module in self.model._modules.items():
-                    if module.__class__ == torch.nn.Conv2d(1,1,1).__class__: # TODO: make this more elegant instead of creating a dummy Conv2d
-                        h = module.register_backward_hook(self.guidedhook)
-                        self.guidehooks.append(h)
-
-            elif type(guided) == type([]):
-                for module in guided:
+        if guided is True:
+            for name,module in self.model._modules.items():
+                if module.__class__.__name__ == 'ReLU': # TODO: make this more elegant instead of creating a dummy Conv2d
                     h = module.register_backward_hook(self.guidedhook)
                     self.guidehooks.append(h)
+        elif type(guided) == type([]):
+            for module in guided:
+                h = module.register_backward_hook(self.guidedhook)
+                self.guidehooks.append(h)
 
-            if self.verbose:
-                print('len(self.guidehooks) =',len(self.guidehooks))
-                print('guided backprop hooks set')
+        if self.verbose:
+            print('len(self.guidehooks) =',len(self.guidehooks))
+            print('guided backprop hooks set')
 
     def __call__(self,x,submodule=None,classes='all'):
         """
@@ -102,6 +95,8 @@ class GradCAM():
             self.gradCAMs - (numpy.ndarray) numpy.ndarray of shape (batch,classes,u,v) where u and v are the activation map dimensions
         """
         x = x.to(self.device)
+        x.retain_grad()
+
         if self.verbose:
             print('samples pushed to device')
 
@@ -114,7 +109,7 @@ class GradCAM():
             print('CAM hooks set')
 
         # forward pass
-        if self.guided:
+        if self.guided and x.requires_grad==False:
             x.requires_grad = True
 
         self.results = self.model(x) # store result (already on device)
@@ -125,7 +120,6 @@ class GradCAM():
         # grad and CAM computations
         summed = self.results.sum(dim=0) # sum out batch results. See note at top of file
 
-        # retain graph if not on last iteration
         if classes == 'all':
             classes = [x for x in range(self.results.size(1))] # list of all classes
         for c in classes: # loop thru classes
@@ -141,9 +135,7 @@ class GradCAM():
             self.gradCAMs = torch.cat([self.gradCAMs, cam.unsqueeze(0).to('cpu')],dim=0) # add CAMs to function output variable
             self.model.zero_grad() # clear gradients for next backprop
 
-            if c == 243:
-                TEMP_GRAD = x.grad[0].permute(1,2,0).detach().numpy()
-
+            self.inputGrads = torch.cat([self.inputGrads, x.grad.cpu().unsqueeze(0)],dim=0) # save grad of class w.r.t. inputs
             x.grad.data = torch.zeros_like(x.grad.data) # clear out input grads as well
 
             if self.verbose:
@@ -157,14 +149,14 @@ class GradCAM():
         if len(self.guidehooks) == 0:
             for hook in self.guidehooks:
                 hook.remove()
-
         if self.verbose:
             print('all hooks removed')
 
         self.gradCAMs = self.gradCAMs.permute(1,0,2,3).detach().numpy() # batch first, requires_grad=False, and convert to numpy array
+        self.inputGrads = self.inputGrads.permute(1,0,2,3,4) # batch,class,channel,height,width
 
         if self.verbose:
-            print('x.grad.shape =',x.grad.shape)
+            print('self.inputGrads.shape =',self.inputGrads.shape)
 
         return self.gradCAMs
 
@@ -232,7 +224,7 @@ class GradCAM():
         """
         guidedhook
 
-        Hook that applies a ReLU operation to gradients for guided backpropagation.
+        Hook that applies a clamping operation to gradients for guided backpropagation.
         Modifies gradient during backprop by returning an altered gradin.
 
         inputs:
@@ -243,9 +235,9 @@ class GradCAM():
             gradout - (tuple) tuple of gradients of loss w.r.t. outputs of mod
         """
         if len(gradin) == 1:
-            return (self.gradReLU(gradin[0]))
+            return (torch.clamp(gradin[0],min=0),)
 
-        return (self.gradReLU(gradin[0]), gradin[1], gradin[2])
+        return (torch.clamp(gradin[0],min=0), gradin[1], gradin[2])
 
 class Flatten(torch.nn.Module):
     """
@@ -354,7 +346,7 @@ if __name__ == '__main__':
     # create GradCAM object and generae grad-CAMs
     hookmods = []
     for name,module in vgg.features._modules.items():
-        if module.__class__ == torch.nn.Conv2d(1,1,1).__class__:
+        if module.__class__.__name__ == 'ReLU':
             hookmods.append(module)
 
     GC = GradCAM(model = vgg, device = 'cuda', guided = hookmods, verbose=True)
@@ -367,5 +359,12 @@ if __name__ == '__main__':
         mask = (mask - np.min(mask)) / np.max(mask)
         create_masked_image(x,mask ,filename='examples/cam_class_{}.jpg'.format(classes[i]))
 
-    print('type(TEMP_GRAD) =',type(TEMP_GRAD))
-    plt.imshow(TEMP_GRAD)
+    import matplotlib.pyplot as plt
+    ig = GC.inputGrads[0][0].permute(1,2,0).numpy()
+    ig[ig<0] = 0
+    ig = ig - np.min(ig)
+    ig = ig / np.max(ig)
+    print('np.max(ig) =',np.max(ig))
+    print('np.min(ig) =',np.min(ig))
+    plt.imshow(ig)
+    plt.show()

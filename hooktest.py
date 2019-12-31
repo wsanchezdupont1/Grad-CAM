@@ -73,3 +73,19 @@ n = torch.nn.Conv2d(3,5,3)
 h = n.register_backward_hook(hookfoo)
 n(x).sum().backward()
 print('x.grad =',x.grad)
+
+print('\n\n\n\n')
+
+
+# ReLU layers
+def hookfoo(a,b,c):
+    print('a = ',a)
+    print('b = ',b)
+    print('c = ',c)
+
+n = torch.nn.ReLU()
+h = n.register_backward_hook(hookfoo)
+
+x = torch.rand(4,4,requires_grad=True)
+
+n(x).sum().backward()
