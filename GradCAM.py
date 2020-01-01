@@ -61,7 +61,7 @@ class GradCAM():
 
         self.guided = guided
         self.guidehooks = [] # list of hooks on conv layers for guided backprop
-        self.inputGrads = torch.empty(0) # grads of class activations w.r.t. inputs
+        self.guidedGrads = torch.empty(0) # grads of class activations w.r.t. inputs
 
         self.verbose = verbose
 
@@ -135,7 +135,7 @@ class GradCAM():
             self.gradCAMs = torch.cat([self.gradCAMs, cam.unsqueeze(0).to('cpu')],dim=0) # add CAMs to function output variable
             self.model.zero_grad() # clear gradients for next backprop
 
-            self.inputGrads = torch.cat([self.inputGrads, x.grad.cpu().unsqueeze(0)],dim=0) # save grad of class w.r.t. inputs
+            self.guidedGrads = torch.cat([self.guidedGrads, x.grad.cpu().unsqueeze(0)],dim=0) # save grad of class w.r.t. inputs
             x.grad.data = torch.zeros_like(x.grad.data) # clear out input grads as well
 
             if self.verbose:
@@ -153,18 +153,25 @@ class GradCAM():
             print('all hooks removed')
 
         self.gradCAMs = self.gradCAMs.permute(1,0,2,3).detach().numpy() # batch first, requires_grad=False, and convert to numpy array
-        self.inputGrads = self.inputGrads.permute(1,0,2,3,4) # batch,class,channel,height,width
-
-        # for i in range(self.gradCAMs.shape[0]):
-        #     for j in range(self.gradCAMs.shape[1]):
-        #         self.gradCAMs[i][j] = cv2.resize(self.gradCAMs[i][j],(x.shape[-2],x.shape[-1]))
-        #         self.gradCAMs[i][j] = self.gradCAMs[i][j] - np.min(self.gradCAMs[i][j])
-        #         self.gradCAMs[i][j] = self.gradCAMs[i][j] / np.max(self.gradCAMs[i][j])
+        self.guidedGrads = self.guidedGrads.permute(1,0,2,3,4).numpy() # batch,class,channel,height,width
 
         if self.verbose:
             print('self.gradCAMs.shape =',self.gradCAMs.shape)
             if self.guided:
-                print('self.inputGrads.shape =',self.inputGrads.shape)
+                print('self.guidedGrads.shape =',self.guidedGrads.shape)
+
+        resizedGradCAMs = np.zeros((self.gradCAMs.shape[0],self.gradCAMs.shape[1],x.shape[-2],x.shape[-1]))
+        for i in range(self.gradCAMs.shape[0]):
+            for j in range(self.gradCAMs.shape[1]):
+                resizedGradCAMs[i][j] = cv2.resize(self.gradCAMs[i][j],(x.shape[-2],x.shape[-1]))
+                # if self.guided:
+                #     resizedGradCAMs[i][j] = resizedGradCAMs[i][j] *
+                resizedGradCAMs[i][j] = resizedGradCAMs[i][j] - np.min(resizedGradCAMs[i][j])
+                resizedGradCAMs[i][j] = resizedGradCAMs[i][j] / np.max(resizedGradCAMs[i][j])
+
+        self.gradCAMs = resizedGradCAMs
+        if self.verbose:
+            print('self.gradCAMs.shape =',self.gradCAMs.shape)
 
         return self.gradCAMs
 
@@ -363,29 +370,28 @@ if __name__ == '__main__':
 
     # reshape grad-CAMs + create heatmaps + save images
     for i in range(len(classes)):
-        mask = cv2.resize(cam[0][i],(224,224))
+        mask = cam[0][i]
         mask = (mask - np.min(mask)) / np.max(mask)
         create_masked_image(x,mask ,filename='examples/cam_class_{}.jpg'.format(classes[i]))
 
     import matplotlib.pyplot as plt
     c = 1
-    ig = GC.inputGrads[0][c].permute(1,2,0).numpy()
-    # ig[ig<0] = 0
-    # ig = ig - np.min(ig)
-    # ig = ig / np.max(ig)
-    print('np.max(ig) =',np.max(ig))
-    print('np.min(ig) =',np.min(ig))
-    plt.imshow(ig)
+    ggrads = GC.guidedGrads[0][c].transpose(1,2,0)
+    # ggrads[ggrads<0] = 0
+    # ggrads = ggrads - np.min(ggrads)
+    # ggrads = ggrads / np.max(ggrads)
+    print('np.max(ggrads) =',np.max(ggrads))
+    print('np.min(ggrads) =',np.min(ggrads))
+    plt.imshow(ggrads)
     plt.show()
 
-    mask = cv2.resize(cam[0][c],(224,224))
+    print('cam[0][c].shape =',cam[0][c].shape)
+    mask = cam[0][c]
     mask = (mask - np.min(mask)) / np.max(mask)
-    gcam = np.zeros((224,224,3))
-    gcam[:,:,0] = mask
-    gcam[:,:,1] = mask
-    gcam[:,:,2] = mask
-    ggcam = ig*gcam
+    ggcam = ggrads*mask.reshape(*mask.shape,1) # add dimension to allow multiplication with guided grads
     ggcam = ggcam - np.min(ggcam)
     ggcam = ggcam / np.max(ggcam)
+    print('np.max(ggcam) =',np.max(ggcam))
+    print('np.min(ggcam) =',np.min(ggcam))
     plt.imshow(ggcam)
     plt.show()
