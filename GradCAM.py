@@ -160,12 +160,17 @@ class GradCAM():
             if self.guided:
                 print('self.guidedGrads.shape =',self.guidedGrads.shape)
 
-        resizedGradCAMs = np.zeros((self.gradCAMs.shape[0],self.gradCAMs.shape[1],x.shape[-2],x.shape[-1]))
+        if self.guided:
+            resizedGradCAMs = np.zeros((self.gradCAMs.shape[0],self.gradCAMs.shape[1],1,x.shape[-2],x.shape[-1]))
+            resizedGradCAMs = resizedGradCAMs * np.ones()
+        else:
+            resizedGradCAMs = np.zeros((self.gradCAMs.shape[0],self.gradCAMs.shape[1],x.shape[-2],x.shape[-1]))
         for i in range(self.gradCAMs.shape[0]):
             for j in range(self.gradCAMs.shape[1]):
                 resizedGradCAMs[i][j] = cv2.resize(self.gradCAMs[i][j],(x.shape[-2],x.shape[-1]))
-                # if self.guided:
-                #     resizedGradCAMs[i][j] = resizedGradCAMs[i][j] *
+                if self.guided:
+                    resizedGradCAMs[i][j] = resizedGradCAMs[i][j] * self.guidedGrads[i][j]
+
                 resizedGradCAMs[i][j] = resizedGradCAMs[i][j] - np.min(resizedGradCAMs[i][j])
                 resizedGradCAMs[i][j] = resizedGradCAMs[i][j] / np.max(resizedGradCAMs[i][j])
 
@@ -372,7 +377,7 @@ if __name__ == '__main__':
     for i in range(len(classes)):
         mask = cam[0][i]
         mask = (mask - np.min(mask)) / np.max(mask)
-        create_masked_image(x,mask ,filename='examples/cam_class_{}.jpg'.format(classes[i]))
+        create_masked_image(x,mask,filename='examples/cam_class_{}.jpg'.format(classes[i]))
 
     import matplotlib.pyplot as plt
     c = 1
@@ -384,6 +389,9 @@ if __name__ == '__main__':
     print('np.min(ggrads) =',np.min(ggrads))
     plt.imshow(ggrads)
     plt.show()
+    im = ggrads - ggrads.min()
+    im = ggrads / ggrads.max()
+    cv2.imwrite(im,filename='examples/guided_grads_class_{}.jpg')
 
     print('cam[0][c].shape =',cam[0][c].shape)
     mask = cam[0][c]
@@ -395,3 +403,4 @@ if __name__ == '__main__':
     print('np.min(ggcam) =',np.min(ggcam))
     plt.imshow(ggcam)
     plt.show()
+    cv2.imwrite(ggcam,filename='examples/guided_gradcam_class_{}.jpg')
