@@ -161,15 +161,14 @@ class GradCAM():
                 print('self.guidedGrads.shape =',self.guidedGrads.shape)
 
         if self.guided:
-            resizedGradCAMs = np.zeros((self.gradCAMs.shape[0],self.gradCAMs.shape[1],1,x.shape[-2],x.shape[-1]))
-            resizedGradCAMs = resizedGradCAMs * np.ones()
+            resizedGradCAMs = np.zeros((self.gradCAMs.shape[0],self.gradCAMs.shape[1],3,x.shape[-2],x.shape[-1]))
         else:
             resizedGradCAMs = np.zeros((self.gradCAMs.shape[0],self.gradCAMs.shape[1],x.shape[-2],x.shape[-1]))
         for i in range(self.gradCAMs.shape[0]):
             for j in range(self.gradCAMs.shape[1]):
-                resizedGradCAMs[i][j] = cv2.resize(self.gradCAMs[i][j],(x.shape[-2],x.shape[-1]))
+                resizedcam = cv2.resize(self.gradCAMs[i][j],(x.shape[-2],x.shape[-1]))
                 if self.guided:
-                    resizedGradCAMs[i][j] = resizedGradCAMs[i][j] * self.guidedGrads[i][j]
+                    resizedGradCAMs[i][j] = resizedcam.reshape(1,*resizedcam.shape) * self.guidedGrads[i][j]
 
                 resizedGradCAMs[i][j] = resizedGradCAMs[i][j] - np.min(resizedGradCAMs[i][j])
                 resizedGradCAMs[i][j] = resizedGradCAMs[i][j] / np.max(resizedGradCAMs[i][j])
@@ -353,6 +352,7 @@ if __name__ == '__main__':
     '''
     VGG19 test using exmaples from https://github.com/jacobgil/pytorch-grad-cam
     '''
+    import matplotlib.pyplot as plt
 
     # this block is mostly copied/adapted from the repo linked above
     x = cv2.imread('examples/both.png',1) # 1 for color image
@@ -375,11 +375,16 @@ if __name__ == '__main__':
 
     # reshape grad-CAMs + create heatmaps + save images
     for i in range(len(classes)):
-        mask = cam[0][i]
-        mask = (mask - np.min(mask)) / np.max(mask)
-        create_masked_image(x,mask,filename='examples/cam_class_{}.jpg'.format(classes[i]))
+        mask = cam[0][i].transpose(1,2,0)
+        if not GC.guided:
+            mask = (mask - np.min(mask)) / np.max(mask)
+        plt.imshow(mask)
+        plt.show()
+        if GC.guided:
+            cv2.imwrite(filename='examples/guided_gradcam_class_{}.jpg'.format(classes[i]),img=np.uint8(mask*255))
+        else:
+            create_masked_image(x,mask,filename='examples/cam_class_{}.jpg'.format(classes[i]))
 
-    import matplotlib.pyplot as plt
     c = 1
     ggrads = GC.guidedGrads[0][c].transpose(1,2,0)
     # ggrads[ggrads<0] = 0
@@ -391,7 +396,6 @@ if __name__ == '__main__':
     plt.show()
     im = ggrads - ggrads.min()
     im = ggrads / ggrads.max()
-    cv2.imwrite(im,filename='examples/guided_grads_class_{}.jpg')
 
     print('cam[0][c].shape =',cam[0][c].shape)
     mask = cam[0][c]
@@ -403,4 +407,3 @@ if __name__ == '__main__':
     print('np.min(ggcam) =',np.min(ggcam))
     plt.imshow(ggcam)
     plt.show()
-    cv2.imwrite(ggcam,filename='examples/guided_gradcam_class_{}.jpg')
