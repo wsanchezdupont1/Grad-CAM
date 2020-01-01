@@ -155,8 +155,16 @@ class GradCAM():
         self.gradCAMs = self.gradCAMs.permute(1,0,2,3).detach().numpy() # batch first, requires_grad=False, and convert to numpy array
         self.inputGrads = self.inputGrads.permute(1,0,2,3,4) # batch,class,channel,height,width
 
+        # for i in range(self.gradCAMs.shape[0]):
+        #     for j in range(self.gradCAMs.shape[1]):
+        #         self.gradCAMs[i][j] = cv2.resize(self.gradCAMs[i][j],(x.shape[-2],x.shape[-1]))
+        #         self.gradCAMs[i][j] = self.gradCAMs[i][j] - np.min(self.gradCAMs[i][j])
+        #         self.gradCAMs[i][j] = self.gradCAMs[i][j] / np.max(self.gradCAMs[i][j])
+
         if self.verbose:
-            print('self.inputGrads.shape =',self.inputGrads.shape)
+            print('self.gradCAMs.shape =',self.gradCAMs.shape)
+            if self.guided:
+                print('self.inputGrads.shape =',self.inputGrads.shape)
 
         return self.gradCAMs
 
@@ -360,11 +368,24 @@ if __name__ == '__main__':
         create_masked_image(x,mask ,filename='examples/cam_class_{}.jpg'.format(classes[i]))
 
     import matplotlib.pyplot as plt
-    ig = GC.inputGrads[0][0].permute(1,2,0).numpy()
-    ig[ig<0] = 0
-    ig = ig - np.min(ig)
-    ig = ig / np.max(ig)
+    c = 1
+    ig = GC.inputGrads[0][c].permute(1,2,0).numpy()
+    # ig[ig<0] = 0
+    # ig = ig - np.min(ig)
+    # ig = ig / np.max(ig)
     print('np.max(ig) =',np.max(ig))
     print('np.min(ig) =',np.min(ig))
     plt.imshow(ig)
+    plt.show()
+
+    mask = cv2.resize(cam[0][c],(224,224))
+    mask = (mask - np.min(mask)) / np.max(mask)
+    gcam = np.zeros((224,224,3))
+    gcam[:,:,0] = mask
+    gcam[:,:,1] = mask
+    gcam[:,:,2] = mask
+    ggcam = ig*gcam
+    ggcam = ggcam - np.min(ggcam)
+    ggcam = ggcam / np.max(ggcam)
+    plt.imshow(ggcam)
     plt.show()
