@@ -169,6 +169,13 @@ class GradCAM():
                 resizedcam = cv2.resize(self.gradCAMs[i][j],(x.shape[-2],x.shape[-1]))
                 if self.guided:
                     resizedGradCAMs[i][j] = resizedcam.reshape(1,*resizedcam.shape) * self.guidedGrads[i][j]
+                else:
+                    resizedGradCAMs[i][j] = resizedcam
+
+                if self.verbose:
+                    print('resizedGradCAMs.shape =',resizedGradCAMs.shape)
+                    print('resizedGradCAMs.min() =',resizedGradCAMs.min())
+                    print('resizedGradCAMs.max() =',resizedGradCAMs.max())
 
                 resizedGradCAMs[i][j] = resizedGradCAMs[i][j] - np.min(resizedGradCAMs[i][j])
                 resizedGradCAMs[i][j] = resizedGradCAMs[i][j] / np.max(resizedGradCAMs[i][j])
@@ -322,8 +329,6 @@ if __name__ == '__main__':
     '''
     from matplotlib import pyplot as plt
     import numpy as np
-    from torchvision.models import vgg19
-    import cv2
     from torch.autograd import Variable,Function
 
     '''
@@ -352,12 +357,14 @@ if __name__ == '__main__':
     '''
     VGG19 test using exmaples from https://github.com/jacobgil/pytorch-grad-cam
     '''
-    import matplotlib.pyplot as plt
+    import cv2
+    from torchvision.models import vgg19
 
     # this block is mostly copied/adapted from the repo linked above
     x = cv2.imread('examples/both.png',1) # 1 for color image
     x = np.float32(cv2.resize(x, (224,224))) / 255 # move to range [0,1]
     im = preprocess_image(x)
+    im = torch.cat([im,im],dim=0)
 
     # create network and set to eval mode
     vgg = vgg19(pretrained=True)
@@ -369,41 +376,21 @@ if __name__ == '__main__':
         if module.__class__.__name__ == 'ReLU':
             hookmods.append(module)
 
-    GC = GradCAM(model = vgg, device = 'cuda', guided = hookmods, verbose=True)
+    GC = GradCAM(model=vgg, device='cuda', guided=hookmods, verbose=False)
     classes = [243,281]
     cam = GC(im,submodule=GC.model.features._modules["35"],classes=classes)
 
     # reshape grad-CAMs + create heatmaps + save images
     for i in range(len(classes)):
-        mask = cam[0][i].transpose(1,2,0)
+        mask = cam[0][i]
         if not GC.guided:
             mask = (mask - np.min(mask)) / np.max(mask)
-        plt.imshow(mask)
-        plt.show()
         if GC.guided:
+            mask = mask.transpose(1,2,0)
+            ggrads = GC.guidedGrads[0][i].transpose(1,2,0)
+            im = ggrads - ggrads.min()
+            im = im / im.max()
+            cv2.imwrite(filename='examples/guided_backprop_class_{}.jpg'.format(classes[i]),img=np.uint8(im*255))
             cv2.imwrite(filename='examples/guided_gradcam_class_{}.jpg'.format(classes[i]),img=np.uint8(mask*255))
         else:
             create_masked_image(x,mask,filename='examples/cam_class_{}.jpg'.format(classes[i]))
-
-    c = 1
-    ggrads = GC.guidedGrads[0][c].transpose(1,2,0)
-    # ggrads[ggrads<0] = 0
-    # ggrads = ggrads - np.min(ggrads)
-    # ggrads = ggrads / np.max(ggrads)
-    print('np.max(ggrads) =',np.max(ggrads))
-    print('np.min(ggrads) =',np.min(ggrads))
-    plt.imshow(ggrads)
-    plt.show()
-    im = ggrads - ggrads.min()
-    im = ggrads / ggrads.max()
-
-    print('cam[0][c].shape =',cam[0][c].shape)
-    mask = cam[0][c]
-    mask = (mask - np.min(mask)) / np.max(mask)
-    ggcam = ggrads*mask.reshape(*mask.shape,1) # add dimension to allow multiplication with guided grads
-    ggcam = ggcam - np.min(ggcam)
-    ggcam = ggcam / np.max(ggcam)
-    print('np.max(ggcam) =',np.max(ggcam))
-    print('np.min(ggcam) =',np.min(ggcam))
-    plt.imshow(ggcam)
-    plt.show()
