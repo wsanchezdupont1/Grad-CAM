@@ -347,12 +347,13 @@ if __name__ == '__main__':
     vgg = vgg19(pretrained=True)
     vgg.eval()
 
-    # create GradCAM object and generae grad-CAMs
+    # place hooks on vgg19 conv modules
     hookmods = []
     for name,module in vgg.features._modules.items():
         if module.__class__.__name__ == 'ReLU':
             hookmods.append(module)
 
+    # create GradCAM object and generae grad-CAMs
     GC = GradCAM(model=vgg, device='cuda', guided=False, verbose=False)
     classes = [243,281]
     cam = GC(im,submodule=GC.model.features._modules["35"],classes=classes)
