@@ -35,7 +35,7 @@ class GradCAM():
 
     Class that performs grad-CAM algorithm on a given model (ARXIV LINK HERE).
     """
-    def __init__(self,model,device='cuda',guided=None,verbose=False):
+    def __init__(self,model,device='cuda',guided=None,deconv=False,verbose=False):
         """
         Constructor.
 
@@ -46,6 +46,7 @@ class GradCAM():
             apply guided backprop to all modules in self._modules.items() that have a
                      __class__.__name__ of ReLU. If list, apply hooks to all modules in
                      the given list
+            deconv - (bool) use 'deconvolution' backprop operation from https://arxiv.org/abs/1412.6806
             verbose - (bool) enables printouts for e.g. debugging
         """
         self.device = device
@@ -62,6 +63,7 @@ class GradCAM():
         self.guided = guided
         self.guidehooks = [] # list of hooks on conv layers for guided backprop
         self.guidedGrads = torch.empty(0) # grads of class activations w.r.t. inputs
+        self.deconv = deconv
 
         self.verbose = verbose
 
@@ -262,8 +264,11 @@ class GradCAM():
         """
         if len(gradin) != 1:
             raise Exception('len(gradin) != 1. It should be equal to 1 for ReLU layers. Verify which modules you are hooking.')
-            
-        return (torch.clamp(gradin[0],min=0),)
+
+        if self.deconv:
+            return (torch.clamp(gradout[0],min=0),)
+        else:
+            return (torch.clamp(gradin[0],min=0),)
 
 class Flatten(torch.nn.Module):
     """
@@ -331,6 +336,8 @@ if __name__ == '__main__':
     import numpy as np
     from torch.autograd import Variable,Function
 
+    # TODO: add argparse
+
     '''
     VGG19 test using examples from https://github.com/jacobgil/pytorch-grad-cam for comparison
     '''
@@ -354,7 +361,7 @@ if __name__ == '__main__':
             hookmods.append(module)
 
     # create GradCAM object and generae grad-CAMs
-    GC = GradCAM(model=vgg, device='cuda', guided=hookmods, verbose=False)
+    GC = GradCAM(model=vgg, device='cuda', guided=hookmods, deconv=False, verbose=False)
     classes = [243,281]
     cam = GC(im,submodule=GC.model.features._modules["35"],classes=classes)
 
