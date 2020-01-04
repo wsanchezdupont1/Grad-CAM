@@ -332,30 +332,7 @@ if __name__ == '__main__':
     from torch.autograd import Variable,Function
 
     '''
-    Basic test with dummy inputs/model.
-    '''
-    basicTesting = False
-    if basicTesting:
-        x = torch.rand(2,3,4,4)
-        m = torch.nn.Sequential(torch.nn.Conv2d(3,4,2),
-                                torch.nn.ReLU(),
-                                torch.nn.Conv2d(4,4,3,padding=1),
-                                torch.nn.ReLU(),
-                                Flatten(),
-                                torch.nn.Linear(4*3*3,4))
-        GC = GradCAM(m)
-        maps = GC(x,submodule=None) # test using inputs as activations
-
-        maps1 = GC(x[0].unsqueeze(0),submodule=m._modules['2']) # test using direct submodule hooks
-
-        plt.subplot(1,2,1)
-        plt.imshow(np.array(x[0].permute(1,2,0))) # plot input exapmle
-        plt.subplot(1,2,2)
-        plt.imshow(np.array(maps[0][0].detach())) # plot map example
-        plt.show()
-
-    '''
-    VGG19 test using exmaples from https://github.com/jacobgil/pytorch-grad-cam
+    VGG19 test using examples from https://github.com/jacobgil/pytorch-grad-cam for comparison
     '''
     import cv2
     from torchvision.models import vgg19
@@ -376,7 +353,7 @@ if __name__ == '__main__':
         if module.__class__.__name__ == 'ReLU':
             hookmods.append(module)
 
-    GC = GradCAM(model=vgg, device='cuda', guided=hookmods, verbose=False)
+    GC = GradCAM(model=vgg, device='cuda', guided=False, verbose=False)
     classes = [243,281]
     cam = GC(im,submodule=GC.model.features._modules["35"],classes=classes)
 
@@ -388,8 +365,9 @@ if __name__ == '__main__':
         if GC.guided:
             mask = mask.transpose(1,2,0)
             ggrads = GC.guidedGrads[0][i].transpose(1,2,0)
-            im = ggrads - ggrads.min()
-            im = im / im.max()
+            ggrads = ggrads - ggrads.min()
+            ggrads = ggrads / ggrads.max()
+            print('im.dtype =',im.dtype)
             cv2.imwrite(filename='examples/guided_backprop_class_{}.jpg'.format(classes[i]),img=np.uint8(im*255))
             cv2.imwrite(filename='examples/guided_gradcam_class_{}.jpg'.format(classes[i]),img=np.uint8(mask*255))
         else:
