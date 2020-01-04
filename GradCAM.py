@@ -395,7 +395,7 @@ if __name__ == '__main__':
     cam = GC(im,submodule=GC.model.features._modules["35"],classes=classes) # hook output of last ReLU in vgg feature extractor
     if opts.timer:
         end = time.time()
-        print('grad-CAM computation time(s) ={}'.format(end-start))
+        print('grad-CAM computation time = {}'.format(end-start))
 
     # reshape grad-CAMs + create heatmaps + save images
     # Note: only first image from batch is used because this test script processes a batch of the same sample
