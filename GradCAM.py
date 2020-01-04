@@ -22,6 +22,8 @@ Notes:
   repo and running grad-cam.py results in the same image as the one produced by the code in this
   file (perhaps that image was generated from a previous version of their code?).
   Also note that "cat.jpg" is identical to the results from this repo.
+  - (argument parsing) For some reason, argparse insists that the -g flag comes after --classes.
+    This problem doesn't arise if you use the full flag (i.e. --guided)
 
 """
 
@@ -33,9 +35,9 @@ class GradCAM():
     """
     GradCAM
 
-    Class that performs grad-CAM algorithm on a given model (ARXIV LINK HERE).
+    Class that performs grad-CAM or guided grad-CAM on a given model (https://arxiv.org/abs/1610.02391).
     """
-    def __init__(self,model,device='cuda',guided=None,deconv=False,verbose=False):
+    def __init__(self,model,device='cuda',guided=False,deconv=False,verbose=False):
         """
         Constructor.
 
@@ -337,35 +339,66 @@ if __name__ == '__main__':
     from torch.autograd import Variable,Function
 
     # TODO: add argparse
+    from argparse import ArgumentParser
 
+    parser = ArgumentParser()
+
+    parser.add_argument('-d','--device',type=str,default='cuda',help="Device to use for computations. | 'cuda' (default) or 'cpu'")
+    parser.add_argument('-g','--guided',action='store_true',help="Flag to use guided grad-CAM")
+    parser.add_argument('--deconv',action='store_true',help="Flag to enable 'deconv' operation during backprop instead of guided grad-CAM (must have --guided flag enabled as well) (see https://arxiv.org/abs/1412.6806)")
+    parser.add_argument('-v','--verbose',action='store_true',help="Enable verbose mode")
+    parser.add_argument('-c','--classes',type=int,nargs='+',default=281,help="Variable number of arguments giving list of vgg class indices to compute CAMs for (e.g. '281' or '243 281' etc.) | default: 281 (tabby cat)")
+    parser.add_argument('-i','--imname',type=str,default='./examples/both.png',help="Filename of desired input image")
+    parser.add_argument('-b','--batchsize',type=int,default=2,help="Number of samples to process as a batch (copies of same image). Can be used for timing")
+    parser.add_argument('-t','--timer',action='store_true',help="Flag to enable timing of grad-CAM computation. Enables timing of grad-CAM __call__ only")
+
+    opts = parser.parse_args()
     '''
     VGG19 test using examples from https://github.com/jacobgil/pytorch-grad-cam for comparison
     '''
     import cv2
     from torchvision.models import vgg19
+    if opts.timer:
+        import time
 
     # this block is mostly copied/adapted from the repo linked above
-    x = cv2.imread('examples/both.png',1) # 1 for color image
+    x = cv2.imread(opts.imname,1) # 1 for color image
     x = np.float32(cv2.resize(x, (224,224))) / 255 # move to range [0,1]
     im = preprocess_image(x)
-    im = torch.cat([im,im],dim=0)
+    im = torch.cat(opts.batchsize*[im],dim=0)
 
     # create network and set to eval mode
     vgg = vgg19(pretrained=True)
     vgg.eval()
 
-    # place hooks on vgg19 conv modules
-    hookmods = []
-    for name,module in vgg.features._modules.items():
-        if module.__class__.__name__ == 'ReLU':
-            hookmods.append(module)
+    # place hooks on vgg19 ReLU modules inside the .features submodule
+    if opts.guided:
+        hookmods = []
+        for name,module in vgg.features._modules.items():
+            if module.__class__.__name__ == 'ReLU':
+                hookmods.append(module)
+        g = hookmods
+    else:
+        g = False
 
     # create GradCAM object and generae grad-CAMs
-    GC = GradCAM(model=vgg, device='cuda', guided=hookmods, deconv=False, verbose=False)
-    classes = [243,281]
-    cam = GC(im,submodule=GC.model.features._modules["35"],classes=classes)
+    GC = GradCAM(model=vgg, device=opts.device, guided=g, deconv=opts.deconv, verbose=opts.verbose)
+    if opts.classes.__class__.__name__ == 'list':
+        classes = opts.classes
+    elif opts.classes.__class__.__name__ == 'int':
+        classes = [opts.classes]
+    else:
+        raise Exception("Invalid list of classes provided!")
+
+    if opts.timer:
+        start = time.time()
+    cam = GC(im,submodule=GC.model.features._modules["35"],classes=classes) # hook output of last ReLU in vgg feature extractor
+    if opts.timer:
+        end = time.time()
+        print('grad-CAM computation time(s) ={}'.format(end-start))
 
     # reshape grad-CAMs + create heatmaps + save images
+    # Note: only first image from batch is used because this test script processes a batch of the same sample
     for i in range(len(classes)):
         mask = cam[0][i]
         if not GC.guided:
