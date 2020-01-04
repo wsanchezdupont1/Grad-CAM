@@ -54,6 +54,7 @@ class GradCAM():
         self.device = device
         self.model = model
         model.to(self.device) # push params to device
+        self.model.eval()
 
         self.activations = torch.empty(0) # initialize activation maps
         self.grads = torch.empty(0) # initialize gradient maps
@@ -369,9 +370,8 @@ if __name__ == '__main__':
 
     # create network and set to eval mode
     vgg = vgg19(pretrained=True)
-    vgg.eval()
 
-    # place hooks on vgg19 ReLU modules inside the .features submodule
+    # place hooks on ReLU modules inside the vgg.features submodule
     if opts.guided:
         hookmods = []
         for name,module in vgg.features._modules.items():
