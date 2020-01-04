@@ -260,10 +260,10 @@ class GradCAM():
                      (input.grad, mod.weight.grad, mod.bias.grad)
             gradout - (tuple) tuple of gradients of loss w.r.t. outputs of mod
         """
-        if len(gradin) == 1:
-            return (torch.clamp(gradin[0],min=0),)
-
-        return (torch.clamp(gradin[0],min=0), gradin[1], gradin[2])
+        if len(gradin) != 1:
+            raise Exception('len(gradin) != 1. It should be equal to 1 for ReLU layers. Verify which modules you are hooking.')
+            
+        return (torch.clamp(gradin[0],min=0),)
 
 class Flatten(torch.nn.Module):
     """
@@ -354,7 +354,7 @@ if __name__ == '__main__':
             hookmods.append(module)
 
     # create GradCAM object and generae grad-CAMs
-    GC = GradCAM(model=vgg, device='cuda', guided=False, verbose=False)
+    GC = GradCAM(model=vgg, device='cuda', guided=hookmods, verbose=False)
     classes = [243,281]
     cam = GC(im,submodule=GC.model.features._modules["35"],classes=classes)
 
@@ -368,8 +368,7 @@ if __name__ == '__main__':
             ggrads = GC.guidedGrads[0][i].transpose(1,2,0)
             ggrads = ggrads - ggrads.min()
             ggrads = ggrads / ggrads.max()
-            print('im.dtype =',im.dtype)
-            cv2.imwrite(filename='examples/guided_backprop_class_{}.jpg'.format(classes[i]),img=np.uint8(im*255))
+            cv2.imwrite(filename='examples/guided_backprop_class_{}.jpg'.format(classes[i]),img=np.uint8(ggrads*255))
             cv2.imwrite(filename='examples/guided_gradcam_class_{}.jpg'.format(classes[i]),img=np.uint8(mask*255))
         else:
             create_masked_image(x,mask,filename='examples/cam_class_{}.jpg'.format(classes[i]))
