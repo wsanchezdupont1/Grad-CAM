@@ -37,18 +37,13 @@ class GradCAM():
 
     Class that performs grad-CAM or guided grad-CAM on a given model (https://arxiv.org/abs/1610.02391).
     """
-    def __init__(self,model,device='cuda',guided=False,deconv=False,verbose=False):
+    def __init__(self,model,device='cuda',verbose=False):
         """
         Constructor.
 
         inputs:
             model - (torch.nn.Module) Indexable module to perform grad-cam on (e.g. torch.nn.Sequential)
             device - (str) device to perform computations on
-            guided - (None or True or list) Guided grad-CAM enabler. If None, no guided gradcam. If True,
-            apply guided backprop to all modules in self._modules.items() that have a
-                     __class__.__name__ of ReLU. If list, apply hooks to all modules in
-                     the given list
-            deconv - (bool) use 'deconvolution' backprop operation from https://arxiv.org/abs/1412.6806
             verbose - (bool) enables printouts for e.g. debugging
         """
         self.device = device
@@ -63,29 +58,13 @@ class GradCAM():
         self.fh = [] # module forward hook
         self.bh = [] # module backward hook
 
-        self.guided = guided
         self.guidehooks = [] # list of hooks on conv layers for guided backprop
         self.guidedGrads = torch.empty(0) # grads of class activations w.r.t. inputs
-        self.deconv = deconv
+        self.deconv = None
 
         self.verbose = verbose
 
-        # TODO: look up if this applies to non-conv layers
-        if guided is True:
-            for name,module in self.model._modules.items():
-                if module.__class__.__name__ == 'ReLU': # TODO: make this more elegant instead of creating a dummy Conv2d
-                    h = module.register_backward_hook(self.guidedhook)
-                    self.guidehooks.append(h)
-        elif type(guided) == type([]):
-            for module in guided:
-                h = module.register_backward_hook(self.guidedhook)
-                self.guidehooks.append(h)
-
-        if self.verbose:
-            print('len(self.guidehooks) =',len(self.guidehooks))
-            print('guided backprop hooks set')
-
-    def __call__(self,x,submodule=None,classes='all'):
+    def __call__(self,x,submodule=None,classes='all',guided=False,deconv=False):
         """
         __call__
 
@@ -95,6 +74,10 @@ class GradCAM():
             x - (torch.Tensor) input image to compute CAMs for.
             submodule - (str or torch.nn.Module) name of module to get CAMs from OR submodule object to hook directly
             classes - (list) list of indices specifying which classes to compute grad-CAM for (MUST CONTAIN UNIQUE ELEMENTS). CAMs are returned in same order as specified in classes.
+            guided - (None or True or list) Guided grad-CAM enabler. If None, no guided gradcam. If True,
+                     apply guided backprop to all modules in self._modules.items() that have a
+                     __class__.__name__ of ReLU. If list, apply hooks to all modules in the given list
+            deconv - (bool) use 'deconvolution' backprop operation from https://arxiv.org/abs/1412.6806
 
         outputs:
             self.gradCAMs - (numpy.ndarray) numpy.ndarray of shape (batch,classes,u,v) where u and v are the activation map dimensions
@@ -109,12 +92,15 @@ class GradCAM():
             self.activations = x # treat inputs as activation maps
 
         # hook registration
-        self.sethooks(submodule)
+        self.set_gradhook(submodule)
         if self.verbose:
             print('CAM hooks set')
 
+        self.deconv = deconv
+        self.set_guidehooks(guided)
+
         # forward pass
-        if self.guided and x.requires_grad==False:
+        if guided and x.requires_grad==False:
             x.requires_grad = True
 
         self.results = self.model(x) # store result (already on device)
@@ -162,17 +148,17 @@ class GradCAM():
 
         if self.verbose:
             print('self.gradCAMs.shape =',self.gradCAMs.shape)
-            if self.guided:
+            if guided:
                 print('self.guidedGrads.shape =',self.guidedGrads.shape)
 
-        if self.guided:
+        if guided:
             resizedGradCAMs = np.zeros((self.gradCAMs.shape[0],self.gradCAMs.shape[1],3,x.shape[-2],x.shape[-1]))
         else:
             resizedGradCAMs = np.zeros((self.gradCAMs.shape[0],self.gradCAMs.shape[1],x.shape[-2],x.shape[-1]))
         for i in range(self.gradCAMs.shape[0]):
             for j in range(self.gradCAMs.shape[1]):
                 resizedcam = cv2.resize(self.gradCAMs[i][j],(x.shape[-2],x.shape[-1]))
-                if self.guided:
+                if guided:
                     resizedGradCAMs[i][j] = resizedcam.reshape(1,*resizedcam.shape) * self.guidedGrads[i][j]
                 else:
                     resizedGradCAMs[i][j] = resizedcam
@@ -191,11 +177,11 @@ class GradCAM():
 
         return self.gradCAMs
 
-    def sethooks(self,submodule=None):
+    def set_gradhook(self,submodule=None):
         """
-        sethooks
+        set_gradhook
 
-        Set hooks for each layer.
+        Set hook on submodule for grad-CAM computation.
 
         inputs:
             submodule - (str or torch.nn.Module) name of submodule within self.model to hook OR submodule to hook directly
@@ -242,7 +228,7 @@ class GradCAM():
         if submodule is None: # if using inputs as activation maps
             self.activations.requires_grad=True # make sure input grads are available
             self.bh = self.activations.register_hook(getgrad_input) # save gradient
-        elif type(submodule) == type(""): # if using string name of submodule...
+        elif submodule.__class__.__name__ == 'str': # if using string name of submodule...
             for name,module in self.model._modules.items():
                 if name == submodule:
                     self.fh = module.register_forward_hook(getactivation) # forward hook
@@ -272,6 +258,29 @@ class GradCAM():
             return (torch.clamp(gradout[0],min=0),)
         else:
             return (torch.clamp(gradin[0],min=0),)
+
+    def set_guidehooks(self,guided=False):
+        """
+        set_guidehooks
+
+        Set hooks on ReLU modules for guided backprop.
+
+        inputs:
+            guided - (bool or torch.nn.Module list) use guided grad-CAM. Hooks all ReLU submodules if True, hooks given modules in list if list
+        """
+        if guided is True:
+            for name,module in self.model._modules.items():
+                if module.__class__.__name__ == 'ReLU': # TODO: make this more elegant instead of creating a dummy Conv2d
+                    h = module.register_backward_hook(self.guidedhook)
+                    self.guidehooks.append(h)
+        elif guided.__class__.__name__ == 'list':
+            for module in guided:
+                h = module.register_backward_hook(self.guidedhook)
+                self.guidehooks.append(h)
+
+        if self.verbose:
+            print('len(self.guidehooks) =',len(self.guidehooks))
+            print('guided backprop hooks set')
 
 class Flatten(torch.nn.Module):
     """
@@ -371,6 +380,15 @@ if __name__ == '__main__':
     # create network and set to eval mode
     vgg = vgg19(pretrained=True)
 
+    # create GradCAM object and generae grad-CAMs
+    GC = GradCAM(model=vgg, device=opts.device, verbose=opts.verbose)
+    if opts.classes.__class__.__name__ == 'list':
+        classes = opts.classes
+    elif opts.classes.__class__.__name__ == 'int':
+        classes = [opts.classes]
+    else:
+        raise Exception("Invalid list of classes provided!")
+
     # place hooks on ReLU modules inside the vgg.features submodule
     if opts.guided:
         hookmods = []
@@ -381,18 +399,9 @@ if __name__ == '__main__':
     else:
         g = False
 
-    # create GradCAM object and generae grad-CAMs
-    GC = GradCAM(model=vgg, device=opts.device, guided=g, deconv=opts.deconv, verbose=opts.verbose)
-    if opts.classes.__class__.__name__ == 'list':
-        classes = opts.classes
-    elif opts.classes.__class__.__name__ == 'int':
-        classes = [opts.classes]
-    else:
-        raise Exception("Invalid list of classes provided!")
-
     if opts.timer:
         start = time.time()
-    cam = GC(im,submodule=GC.model.features._modules["35"],classes=classes) # hook output of last ReLU in vgg feature extractor
+    cam = GC(im,submodule=GC.model.features._modules["35"],classes=classes,guided=g,deconv=opts.deconv) # hook output of last ReLU in vgg feature extractor
     if opts.timer:
         end = time.time()
         print('grad-CAM computation time = {}'.format(end-start))
@@ -401,9 +410,9 @@ if __name__ == '__main__':
     # Note: only first image from batch is used because this test script processes a batch of the same sample
     for i in range(len(classes)):
         mask = cam[0][i]
-        if not GC.guided:
+        if not g:
             mask = (mask - np.min(mask)) / np.max(mask)
-        if GC.guided:
+        if g:
             mask = mask.transpose(1,2,0)
             ggrads = GC.guidedGrads[0][i].transpose(1,2,0)
             ggrads = ggrads - ggrads.min()
