@@ -91,11 +91,12 @@ class GradCAM():
         if submodule is None:
             self.activations = x # treat inputs as activation maps
 
-        # hook registration
+        # register grad hook for vanilla grad-CAM
         self.set_gradhook(submodule)
         if self.verbose:
             print('CAM hooks set')
 
+        # register hooks on ReLUs for guided backprop or 'deconvolution'
         self.deconv = deconv
         self.set_guidehooks(guided)
 
@@ -254,12 +255,27 @@ class GradCAM():
         if len(gradin) != 1:
             raise Exception('len(gradin) != 1. It should be equal to 1 for ReLU layers. Verify which modules you are hooking.')
 
-        if self.deconv:
-            return (torch.clamp(gradout[0],min=0),)
-        else:
-            return (torch.clamp(gradin[0],min=0),)
+        return (torch.clamp(gradin[0],min=0),)
 
-    def set_guidehooks(self,guided=False):
+    def deconvhook(self,mod,gradin,gradout):
+        """
+        deconvhook
+
+        Hook that applies 'deconvolution' operation from https://arxiv.org/abs/1412.6806
+
+        inputs:
+            mod - (torch.nn.Module) module being hooked
+            gradin - (tuple) tuple of gradients of loss w.r.t inputs and parameters of mod.
+                     Different for various layer types. For Conv2d layers, it's
+                     (input.grad, mod.weight.grad, mod.bias.grad)
+            gradout - (tuple) tuple of gradients of loss w.r.t. outputs of mod
+        """
+        if len(gradin) != 1:
+            raise Exception('len(gradin) != 1. It should be equal to 1 for ReLU layers. Verify which modules you are hooking.')
+
+        return (torch.clamp(gradout[0],min=0),)
+
+    def set_guidehooks(self,guided=False,deconv=False):
         """
         set_guidehooks
 
@@ -267,15 +283,20 @@ class GradCAM():
 
         inputs:
             guided - (bool or torch.nn.Module list) use guided grad-CAM. Hooks all ReLU submodules if True, hooks given modules in list if list
+            deconv - (bool) optionally use 'deconvolution' operation instead of guided backpropagation
         """
+        hooktype = self.guidedhook
+        if deconv == True:
+            hooktype = self.deconvhook
+
         if guided is True:
             for name,module in self.model._modules.items():
                 if module.__class__.__name__ == 'ReLU': # TODO: make this more elegant instead of creating a dummy Conv2d
-                    h = module.register_backward_hook(self.guidedhook)
+                    h = module.register_backward_hook(hooktype)
                     self.guidehooks.append(h)
-        elif guided.__class__.__name__ == 'list':
+        elif guided.__class__.__name__ == 'list': # manually provided list of modules to hook
             for module in guided:
-                h = module.register_backward_hook(self.guidedhook)
+                h = module.register_backward_hook(hooktype)
                 self.guidehooks.append(h)
 
         if self.verbose:
@@ -401,7 +422,7 @@ if __name__ == '__main__':
 
     if opts.timer:
         start = time.time()
-    cam = GC(im,submodule=GC.model.features._modules["35"],classes=classes,guided=g,deconv=opts.deconv) # hook output of last ReLU in vgg feature extractor
+    cam = GC(im,submodule=GC.model.features._modules["35"],classes=classes,guided=g,deconv=opts.deconv)
     if opts.timer:
         end = time.time()
         print('grad-CAM computation time = {}'.format(end-start))
