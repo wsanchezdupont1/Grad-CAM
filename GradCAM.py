@@ -22,8 +22,6 @@ Notes:
   repo and running grad-cam.py results in the same image as the one produced by the code in this
   file (perhaps that image was generated from a previous version of their code?).
   Also note that "cat.jpg" is identical to the results from this repo.
-  - (argument parsing) For some reason, argparse insists that the -g flag comes after --classes.
-    This problem doesn't arise if you use the full flag (i.e. --guided)
 
 """
 
