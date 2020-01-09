@@ -28,6 +28,7 @@ Notes:
 import numpy as np
 import torch
 import torch.nn as nn
+import cv2
 
 class GradCAM():
     """
@@ -385,7 +386,6 @@ if __name__ == '__main__':
     '''
     VGG19 test using examples from https://github.com/jacobgil/pytorch-grad-cam for comparison
     '''
-    import cv2
     from torchvision.models import vgg19
     if opts.timer:
         import time
