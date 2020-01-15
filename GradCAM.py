@@ -432,8 +432,6 @@ if __name__ == '__main__':
     # Note: only first image from batch is used because this test script processes a batch of the same sample
     for i in range(len(classes)):
         mask = cam[0][i]
-        if not g:
-            mask = (mask - np.min(mask)) / np.max(mask)
         if g:
             mask = mask.transpose(1,2,0)
             plt.hist(mask.flatten(),bins=100)
@@ -454,4 +452,5 @@ if __name__ == '__main__':
             cv2.imwrite(filename='examples/guided_backprop_class_{}.jpg'.format(classes[i]),img=np.uint8(ggrads*255))
             cv2.imwrite(filename='examples/guided_gradcam_class_{}.jpg'.format(classes[i]),img=np.uint8(mask*255))
         else:
+            mask = (mask - np.min(mask)) / np.max(mask)
             create_masked_image(x,mask,filename='examples/cam_class_{}.jpg'.format(classes[i]))
