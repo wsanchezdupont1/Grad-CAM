@@ -434,8 +434,6 @@ if __name__ == '__main__':
         mask = cam[0][i]
         if g:
             mask = mask.transpose(1,2,0)
-            plt.hist(mask.flatten(),bins=100)
-            plt.show()
             mask = mask - mask.mean()
             mask = mask / mask.std()
             mask = mask*0.1 + 0.5
