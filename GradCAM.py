@@ -369,7 +369,7 @@ if __name__ == '__main__':
     '''
     from matplotlib import pyplot as plt
     import numpy as np
-    from torch.autograd import Variable,Function
+    from torch.autograd import Variable
 
     # TODO: add argparse
     from argparse import ArgumentParser
